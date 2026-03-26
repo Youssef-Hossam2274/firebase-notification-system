@@ -21,79 +21,86 @@ export default function InboxPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [topic, setTopic] = useState("");
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([
+    {
+      title: "Welcome!",
+      body: "This is your notification inbox. Send a message to your topic to see it here.",
+      receivedAt: Date.now(),
+      id: "welcome",
+    },
+  ]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fcmToken, setFcmToken] = useState("");
   const [subscribed, setSubscribed] = useState(false);
 
-  useEffect(() => {
-    const initializeNotifications = async () => {
-      try {
-        // Check session
-        const storedUsername = localStorage.getItem("username");
-        const storedTopic = localStorage.getItem("topic");
+  //   useEffect(() => {
+  //     const initializeNotifications = async () => {
+  //       try {
+  //         // Check session
+  //         const storedUsername = localStorage.getItem("username");
+  //         const storedTopic = localStorage.getItem("topic");
 
-        if (!storedUsername || !storedTopic) {
-          router.push("/");
-          return;
-        }
+  //         if (!storedUsername || !storedTopic) {
+  //           router.push("/");
+  //           return;
+  //         }
 
-        setUsername(storedUsername);
-        setTopic(storedTopic);
+  //         setUsername(storedUsername);
+  //         setTopic(storedTopic);
 
-        // Request notification permission and get FCM token
-        const token = await requestNotificationPermission();
-        if (!token) {
-          setError(
-            "Failed to get notification permission. Notifications may not work.",
-          );
-          setLoading(false);
-          return;
-        }
+  //         // Request notification permission and get FCM token
+  //         const token = await requestNotificationPermission();
+  //         if (!token) {
+  //           setError(
+  //             "Failed to get notification permission. Notifications may not work.",
+  //           );
+  //           setLoading(false);
+  //           return;
+  //         }
 
-        setFcmToken(token);
-        localStorage.setItem("fcmToken", token);
+  //         setFcmToken(token);
+  //         localStorage.setItem("fcmToken", token);
 
-        // Subscribe to topic via API
-        const result = await subscribe(token, storedTopic);
-        if (!result.success) {
-          setError(`Failed to subscribe: ${result.error}`);
-          setLoading(false);
-          return;
-        }
+  //         // Subscribe to topic via API
+  //         const result = await subscribe(token, storedTopic);
+  //         if (!result.success) {
+  //           setError(`Failed to subscribe: ${result.error}`);
+  //           setLoading(false);
+  //           return;
+  //         }
 
-        setSubscribed(true);
+  //         setSubscribed(true);
 
-        // Setup foreground message listener
-        setupForegroundMessageListener(async (title, body, receivedAt) => {
-          const notification: NotificationType = { title, body, receivedAt };
-          await saveNotification(storedTopic, notification);
-        });
+  //         // Setup foreground message listener
+  //         setupForegroundMessageListener(async (title, body, receivedAt) => {
+  //           const notification: NotificationType = { title, body, receivedAt };
+  //           await saveNotification(storedTopic, notification);
+  //         });
 
-        // Subscribe to realtime database changes
-        const unsubscribeDb = subscribeToNotifications(
-          storedTopic,
-          (notificationsData) => {
-            setNotifications(notificationsData);
-          },
-        );
+  //         // Subscribe to realtime database changes
+  //         const unsubscribeDb = subscribeToNotifications(
+  //           storedTopic,
+  //           (notificationsData) => {
+  //             setNotifications(notificationsData);
+  //           },
+  //         );
 
-        setLoading(false);
+  //         setLoading(false);
 
-        // Cleanup on unmount
-        return () => {
-          unsubscribeDb();
-        };
-      } catch (err: any) {
-        console.error("Initialization error:", err);
-        setError(err.message || "An error occurred");
-        setLoading(false);
-      }
-    };
+  //         // Cleanup on unmount
+  //         return () => {
+  //           unsubscribeDb();
+  //         };
+  //       } catch (err: any) {
+  //         console.error("Initialization error:", err);
+  //         setError(err.message || "An error occurred");
+  //         setLoading(false);
+  //       }
+  //     };
 
-    initializeNotifications();
-  }, [router]);
+  //     initializeNotifications();
+  //   }, [router]);
 
   const handleLogout = async () => {
     try {

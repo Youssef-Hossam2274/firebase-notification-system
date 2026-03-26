@@ -16,7 +16,9 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize messaging only if supported (not in Node.js)
 export const messaging =
-  typeof window !== "undefined" && isSupported() ? getMessaging(app) : null;
+  typeof window !== "undefined" && (await isSupported())
+    ? getMessaging(app)
+    : null;
 
 export const database = getDatabase(app);
 
