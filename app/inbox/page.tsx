@@ -1,106 +1,192 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   requestNotificationPermission,
   setupForegroundMessageListener,
 } from "@/lib/firebase/messaging";
-import {
-  saveNotification,
-  subscribeToNotifications,
-  Notification as NotificationType,
-} from "@/lib/firebase/db";
+// Database is temporarily disabled until Realtime Database setup is completed.
+// import {
+//   saveNotification,
+//   subscribeToNotifications,
+//   Notification as NotificationType,
+// } from "@/lib/firebase/db";
 import { subscribe, unsubscribe } from "@/lib/api/client";
 
-interface NotificationItem extends NotificationType {
+interface NotificationItem {
   id: string;
+  title: string;
+  body: string;
+  receivedAt: number;
 }
 
 export default function InboxPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [topic, setTopic] = useState("");
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    {
-      title: "Welcome!",
-      body: "This is your notification inbox. Send a message to your topic to see it here.",
-      receivedAt: Date.now(),
-      id: "welcome",
-    },
-  ]);
-  const [loading, setLoading] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [fcmToken, setFcmToken] = useState("");
   const [subscribed, setSubscribed] = useState(false);
+  const [enablingNotifications, setEnablingNotifications] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | "unsupported"
+  >("unsupported");
+  const [foregroundUnsubscribe, setForegroundUnsubscribe] = useState<
+    (() => void) | null
+  >(null);
+  const autoEnableAttemptedRef = useRef(false);
 
-  //   useEffect(() => {
-  //     const initializeNotifications = async () => {
-  //       try {
-  //         // Check session
-  //         const storedUsername = localStorage.getItem("username");
-  //         const storedTopic = localStorage.getItem("topic");
+  const setupForegroundListener = () => {
+    if (foregroundUnsubscribe) {
+      return;
+    }
 
-  //         if (!storedUsername || !storedTopic) {
-  //           router.push("/");
-  //           return;
-  //         }
+    const unsubscribeForeground = setupForegroundMessageListener(
+      async (title, body, receivedAt) => {
+        // Database write intentionally disabled for now.
+        // const notification: NotificationType = { title, body, receivedAt };
+        // await saveNotification(storedTopic, notification);
 
-  //         setUsername(storedUsername);
-  //         setTopic(storedTopic);
+        // Keep notifications visible in the UI while DB is disabled.
+        setNotifications((prev) => [
+          {
+            id: `${receivedAt}-${Math.random().toString(36).slice(2, 8)}`,
+            title,
+            body,
+            receivedAt,
+          },
+          ...prev,
+        ]);
+      },
+    );
 
-  //         // Request notification permission and get FCM token
-  //         const token = await requestNotificationPermission();
-  //         if (!token) {
-  //           setError(
-  //             "Failed to get notification permission. Notifications may not work.",
-  //           );
-  //           setLoading(false);
-  //           return;
-  //         }
+    setForegroundUnsubscribe(() => unsubscribeForeground);
+  };
 
-  //         setFcmToken(token);
-  //         localStorage.setItem("fcmToken", token);
+  const enableNotifications = async (topicOverride?: string) => {
+    try {
+      setEnablingNotifications(true);
+      setError("");
+      setWarning("");
 
-  //         // Subscribe to topic via API
-  //         const result = await subscribe(token, storedTopic);
-  //         if (!result.success) {
-  //           setError(`Failed to subscribe: ${result.error}`);
-  //           setLoading(false);
-  //           return;
-  //         }
+      const effectiveTopic = topicOverride ?? topic;
+      if (!effectiveTopic) {
+        setError("Topic is missing. Please login again.");
+        return;
+      }
 
-  //         setSubscribed(true);
+      const setupResult = await requestNotificationPermission();
+      if (typeof window !== "undefined" && "Notification" in window) {
+        setNotificationPermission(Notification.permission);
+      }
 
-  //         // Setup foreground message listener
-  //         setupForegroundMessageListener(async (title, body, receivedAt) => {
-  //           const notification: NotificationType = { title, body, receivedAt };
-  //           await saveNotification(storedTopic, notification);
-  //         });
+      if (!setupResult.token) {
+        if (setupResult.error === "notification-permission-denied") {
+          setError(
+            "Notifications are blocked by the browser. Allow notifications for localhost:3000 in site settings, then try again.",
+          );
+          return;
+        }
 
-  //         // Subscribe to realtime database changes
-  //         const unsubscribeDb = subscribeToNotifications(
-  //           storedTopic,
-  //           (notificationsData) => {
-  //             setNotifications(notificationsData);
-  //           },
-  //         );
+        setError(
+          `Failed to create FCM token: ${setupResult.error || "unknown-error"}`,
+        );
+        return;
+      }
 
-  //         setLoading(false);
+      const token = setupResult.token;
+      setFcmToken(token);
+      localStorage.setItem("fcmToken", token);
 
-  //         // Cleanup on unmount
-  //         return () => {
-  //           unsubscribeDb();
-  //         };
-  //       } catch (err: any) {
-  //         console.error("Initialization error:", err);
-  //         setError(err.message || "An error occurred");
-  //         setLoading(false);
-  //       }
-  //     };
+      const result = await subscribe(token, effectiveTopic);
+      if (!result.success) {
+        if (result.error?.includes("Service account key not found")) {
+          setupForegroundListener();
+          setWarning(
+            "FCM token is created, but topic subscribe is disabled until you add serviceAccountKey.json to the project root.",
+          );
+          return;
+        }
+        setError(`Failed to subscribe: ${result.error}`);
+        return;
+      }
 
-  //     initializeNotifications();
-  //   }, [router]);
+      setSubscribed(true);
+      setupForegroundListener();
+    } catch (err: any) {
+      console.error("Enable notifications error:", err);
+      setError(err.message || "Failed to enable notifications");
+    } finally {
+      setEnablingNotifications(false);
+    }
+  };
+
+  useEffect(() => {
+    // DB listener intentionally disabled for now.
+    // let unsubscribeDb: (() => void) | undefined;
+    const initializeNotifications = async () => {
+      try {
+        // Check session
+        const storedUsername = localStorage.getItem("username");
+        const storedTopic = localStorage.getItem("topic");
+
+        if (!storedUsername || !storedTopic) {
+          router.push("/");
+          return;
+        }
+
+        setUsername(storedUsername);
+        setTopic(storedTopic);
+
+        if (typeof window !== "undefined" && "Notification" in window) {
+          setNotificationPermission(Notification.permission);
+        }
+
+        const existingToken = localStorage.getItem("fcmToken");
+        if (existingToken && Notification.permission === "granted") {
+          setFcmToken(existingToken);
+          const result = await subscribe(existingToken, storedTopic);
+          if (result.success) {
+            setSubscribed(true);
+            setupForegroundListener();
+          } else if (result.error?.includes("Service account key not found")) {
+            setupForegroundListener();
+            setWarning(
+              "Token found, but topic subscription is not active. Add serviceAccountKey.json to enable topic subscribe/unsubscribe.",
+            );
+          }
+        } else if (!autoEnableAttemptedRef.current) {
+          autoEnableAttemptedRef.current = true;
+          await enableNotifications(storedTopic);
+        }
+
+        // Realtime database subscription intentionally disabled for now.
+        // unsubscribeDb = subscribeToNotifications(
+        //   storedTopic,
+        //   (notificationsData) => {
+        //     setNotifications(notificationsData);
+        //   },
+        // );
+
+        setLoading(false);
+      } catch (err: any) {
+        console.error("Initialization error:", err);
+        setError(err.message || "An error occurred");
+        setLoading(false);
+      }
+    };
+
+    void initializeNotifications();
+
+    return () => {
+      if (foregroundUnsubscribe) foregroundUnsubscribe();
+      // if (unsubscribeDb) unsubscribeDb();
+    };
+  }, [router, foregroundUnsubscribe]);
 
   const handleLogout = async () => {
     try {
@@ -171,13 +257,33 @@ export default function InboxPage() {
             {subscribed ? "✓ Subscribed to topic" : "⏳ Subscribing..."}
           </div>
           <div
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${Notification.permission === "granted" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${notificationPermission === "granted" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
           >
-            {Notification.permission === "granted"
+            {notificationPermission === "granted"
               ? "✓ Notifications enabled"
               : "⚠ Notifications disabled"}
           </div>
         </div>
+        {!subscribed && (
+          <div className="mt-4">
+            <button
+              onClick={() => void enableNotifications()}
+              disabled={enablingNotifications}
+              className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+            >
+              {enablingNotifications
+                ? "Enabling notifications..."
+                : "Enable Notifications"}
+            </button>
+          </div>
+        )}
+        {notificationPermission === "denied" && (
+          <p className="mt-3 text-sm text-amber-700 bg-amber-100 border border-amber-300 rounded-lg px-3 py-2">
+            Notifications are blocked for this site. Open browser site settings,
+            allow notifications for localhost, then click "Enable Notifications"
+            again.
+          </p>
+        )}
       </div>
 
       {/* Main Content */}
@@ -185,6 +291,11 @@ export default function InboxPage() {
         {error && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6">
             {error}
+          </div>
+        )}
+        {warning && (
+          <div className="bg-amber-100 border border-amber-400 text-amber-800 px-4 py-3 rounded-lg mb-6">
+            {warning}
           </div>
         )}
 
