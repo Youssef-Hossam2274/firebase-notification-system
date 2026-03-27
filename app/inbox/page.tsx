@@ -6,12 +6,11 @@ import {
   requestNotificationPermission,
   setupForegroundMessageListener,
 } from "@/lib/firebase/messaging";
-// Database is temporarily disabled until Realtime Database setup is completed.
-// import {
-//   saveNotification,
-//   subscribeToNotifications,
-//   Notification as NotificationType,
-// } from "@/lib/firebase/db";
+import {
+  saveNotification,
+  subscribeToNotifications,
+  Notification as NotificationType,
+} from "@/lib/firebase/db";
 import { subscribe, unsubscribe } from "@/lib/api/client";
 
 interface NotificationItem {
@@ -29,42 +28,27 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
   const [fcmToken, setFcmToken] = useState("");
   const [subscribed, setSubscribed] = useState(false);
   const [enablingNotifications, setEnablingNotifications] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<
     NotificationPermission | "unsupported"
   >("unsupported");
-  const [foregroundUnsubscribe, setForegroundUnsubscribe] = useState<
-    (() => void) | null
-  >(null);
+  const foregroundUnsubscribeRef = useRef<(() => void) | null>(null);
   const autoEnableAttemptedRef = useRef(false);
 
-  const setupForegroundListener = () => {
-    if (foregroundUnsubscribe) {
+  const setupForegroundListener = (topicForStorage: string) => {
+    if (foregroundUnsubscribeRef.current) {
       return;
     }
 
-    const unsubscribeForeground = setupForegroundMessageListener(
+    foregroundUnsubscribeRef.current = setupForegroundMessageListener(
       async (title, body, receivedAt) => {
-        // Database write intentionally disabled for now.
-        // const notification: NotificationType = { title, body, receivedAt };
-        // await saveNotification(storedTopic, notification);
-
-        // Keep notifications visible in the UI while DB is disabled.
-        setNotifications((prev) => [
-          {
-            id: `${receivedAt}-${Math.random().toString(36).slice(2, 8)}`,
-            title,
-            body,
-            receivedAt,
-          },
-          ...prev,
-        ]);
+        const notification: NotificationType = { title, body, receivedAt };
+        await saveNotification(topicForStorage, notification);
       },
     );
-
-    setForegroundUnsubscribe(() => unsubscribeForeground);
   };
 
   const enableNotifications = async (topicOverride?: string) => {
@@ -105,7 +89,7 @@ export default function InboxPage() {
       const result = await subscribe(token, effectiveTopic);
       if (!result.success) {
         if (result.error?.includes("Service account key not found")) {
-          setupForegroundListener();
+          setupForegroundListener(effectiveTopic);
           setWarning(
             "FCM token is created, but topic subscribe is disabled until you add serviceAccountKey.json to the project root.",
           );
@@ -116,7 +100,7 @@ export default function InboxPage() {
       }
 
       setSubscribed(true);
-      setupForegroundListener();
+      setupForegroundListener(effectiveTopic);
     } catch (err: any) {
       console.error("Enable notifications error:", err);
       setError(err.message || "Failed to enable notifications");
@@ -126,8 +110,7 @@ export default function InboxPage() {
   };
 
   useEffect(() => {
-    // DB listener intentionally disabled for now.
-    // let unsubscribeDb: (() => void) | undefined;
+    let unsubscribeDb: (() => void) | undefined;
     const initializeNotifications = async () => {
       try {
         // Check session
@@ -152,9 +135,9 @@ export default function InboxPage() {
           const result = await subscribe(existingToken, storedTopic);
           if (result.success) {
             setSubscribed(true);
-            setupForegroundListener();
+            setupForegroundListener(storedTopic);
           } else if (result.error?.includes("Service account key not found")) {
-            setupForegroundListener();
+            setupForegroundListener(storedTopic);
             setWarning(
               "Token found, but topic subscription is not active. Add serviceAccountKey.json to enable topic subscribe/unsubscribe.",
             );
@@ -164,13 +147,9 @@ export default function InboxPage() {
           await enableNotifications(storedTopic);
         }
 
-        // Realtime database subscription intentionally disabled for now.
-        // unsubscribeDb = subscribeToNotifications(
-        //   storedTopic,
-        //   (notificationsData) => {
-        //     setNotifications(notificationsData);
-        //   },
-        // );
+        unsubscribeDb = subscribeToNotifications(storedTopic, (notificationsData) => {
+          setNotifications(notificationsData);
+        });
 
         setLoading(false);
       } catch (err: any) {
@@ -183,12 +162,16 @@ export default function InboxPage() {
     void initializeNotifications();
 
     return () => {
-      if (foregroundUnsubscribe) foregroundUnsubscribe();
-      // if (unsubscribeDb) unsubscribeDb();
+      if (foregroundUnsubscribeRef.current) {
+        foregroundUnsubscribeRef.current();
+        foregroundUnsubscribeRef.current = null;
+      }
+      if (unsubscribeDb) unsubscribeDb();
     };
-  }, [router, foregroundUnsubscribe]);
+  }, [router]);
 
   const handleLogout = async () => {
+    setLoggingOut(true);
     try {
       // Unsubscribe from topic
       if (fcmToken && topic) {
@@ -208,6 +191,7 @@ export default function InboxPage() {
     } catch (err) {
       console.error("Logout error:", err);
       setError("Failed to logout");
+      setLoggingOut(false);
     }
   };
 
@@ -228,22 +212,26 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-blue-50">
       {/* Header */}
-      <header className="bg-white shadow">
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 shadow-sm backdrop-blur">
         <div className="max-w-4xl mx-auto px-4 py-6 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800">🔔 Inbox</h1>
-            <p className="text-gray-600 text-sm mt-1">
+            <h1 className="text-3xl font-extrabold tracking-tight text-slate-900">Inbox</h1>
+            <p className="text-slate-600 text-sm mt-1">
               Logged in as: <span className="font-semibold">{username}</span> •
               Topic: <span className="font-semibold">{topic}</span>
             </p>
           </div>
           <button
             onClick={handleLogout}
-            className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+            disabled={loggingOut}
+            className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-4 py-2 font-semibold text-white transition duration-200 hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
           >
-            Logout
+            {loggingOut && (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" />
+            )}
+            {loggingOut ? "Logging out..." : "Logout"}
           </button>
         </div>
       </header>
@@ -252,12 +240,12 @@ export default function InboxPage() {
       <div className="max-w-4xl mx-auto px-4 py-4">
         <div className="flex gap-4 flex-wrap">
           <div
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${subscribed ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
+            className={`rounded-full px-4 py-2 text-sm font-semibold shadow-sm ${subscribed ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
           >
             {subscribed ? "✓ Subscribed to topic" : "⏳ Subscribing..."}
           </div>
           <div
-            className={`px-4 py-2 rounded-lg text-sm font-medium ${notificationPermission === "granted" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
+            className={`rounded-full px-4 py-2 text-sm font-semibold shadow-sm ${notificationPermission === "granted" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}
           >
             {notificationPermission === "granted"
               ? "✓ Notifications enabled"
@@ -269,8 +257,11 @@ export default function InboxPage() {
             <button
               onClick={() => void enableNotifications()}
               disabled={enablingNotifications}
-              className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white shadow-lg shadow-blue-600/20 transition duration-200 hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 disabled:shadow-none"
             >
+              {enablingNotifications && (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-white" />
+              )}
               {enablingNotifications
                 ? "Enabling notifications..."
                 : "Enable Notifications"}
@@ -289,12 +280,12 @@ export default function InboxPage() {
       {/* Main Content */}
       <main className="max-w-4xl mx-auto px-4 py-6">
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6">
+          <div className="mb-6 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-red-700">
             {error}
           </div>
         )}
         {warning && (
-          <div className="bg-amber-100 border border-amber-400 text-amber-800 px-4 py-3 rounded-lg mb-6">
+          <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-800">
             {warning}
           </div>
         )}
@@ -319,18 +310,18 @@ export default function InboxPage() {
               {notifications.map((notification) => (
                 <div
                   key={notification.id}
-                  className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition duration-200"
+                  className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
                 >
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="text-xl font-bold text-gray-800">
+                    <h3 className="text-xl font-bold text-slate-800">
                       {notification.title}
                     </h3>
-                    <time className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                    <time className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-500">
                       {formatDate(notification.receivedAt)}
                     </time>
                   </div>
-                  <p className="text-gray-700">{notification.body}</p>
-                  <p className="text-xs text-gray-400 mt-3">
+                  <p className="text-slate-700">{notification.body}</p>
+                  <p className="mt-3 text-xs text-slate-400">
                     ID: {notification.id}
                   </p>
                 </div>
@@ -340,8 +331,8 @@ export default function InboxPage() {
         </div>
 
         {/* Test Instructions */}
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-          <h3 className="font-bold text-blue-900 mb-3">
+        <div className="mt-8 rounded-xl border border-blue-200 bg-blue-50 p-6">
+          <h3 className="mb-3 font-bold text-blue-900">
             📝 How to send test notifications:
           </h3>
           <ol className="list-decimal list-inside text-blue-900 text-sm space-y-2">

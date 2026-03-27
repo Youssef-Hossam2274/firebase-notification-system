@@ -17,7 +17,6 @@ const app = initializeApp(firebaseConfig);
 
 let messagingInstance: Messaging | null = null;
 
-// Messaging can only be initialized in the browser and only when supported.
 export const getMessagingIfSupported = async (): Promise<Messaging | null> => {
   if (typeof window === "undefined") {
     return null;

@@ -1,5 +1,5 @@
 import { database } from "./config";
-import { ref, push, onValue, Unsubscribe, Query } from "firebase/database";
+import { ref, push, onValue, Unsubscribe } from "firebase/database";
 
 export interface Notification {
   title: string;
@@ -26,17 +26,18 @@ export const subscribeToNotifications = (
 ): Unsubscribe => {
   const notificationsRef = ref(database, `notifications/${topic}`);
 
-  const unsubscribe = onValue(notificationsRef, (snapshot) => {
+  return onValue(notificationsRef, (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.val();
       const notificationsList: (Notification & { id: string })[] = [];
 
-      Object.entries(data).forEach(([key, value]: [string, any]) => {
+      Object.entries(data).forEach(([key, value]) => {
+        const notificationData = value as Partial<Notification>;
         notificationsList.push({
           id: key,
-          title: value.title || "",
-          body: value.body || "",
-          receivedAt: value.receivedAt || 0,
+          title: notificationData.title || "",
+          body: notificationData.body || "",
+          receivedAt: notificationData.receivedAt || 0,
         });
       });
 
@@ -47,8 +48,6 @@ export const subscribeToNotifications = (
       callback([]);
     }
   });
-
-  return unsubscribe;
 };
 
 export default {
