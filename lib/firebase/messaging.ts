@@ -1,6 +1,31 @@
 import { getMessagingIfSupported } from "./config";
 import { getToken, onMessage } from "firebase/messaging";
 
+const waitForActiveServiceWorker = async (
+  registration: ServiceWorkerRegistration,
+  timeoutMs = 10000,
+): Promise<ServiceWorkerRegistration> => {
+  if (registration.active) {
+    return registration;
+  }
+
+  const readyRegistration = await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("service-worker-ready-timeout")),
+        timeoutMs,
+      ),
+    ),
+  ]);
+
+  if (readyRegistration.active) {
+    return readyRegistration;
+  }
+
+  throw new Error("no-active-service-worker");
+};
+
 export interface NotificationSetupResult {
   token: string | null;
   permission: NotificationPermission | "unsupported";
@@ -35,12 +60,15 @@ export const requestNotificationPermission =
       const permission = await Notification.requestPermission();
       if (permission === "granted") {
         const registration = await navigator.serviceWorker.register(
-          "/firebase-messaging-sw.js",
+          "/firebase-messaging-sw",
         );
+
+        const activeRegistration =
+          await waitForActiveServiceWorker(registration);
 
         const token = await getToken(messaging, {
           vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-          serviceWorkerRegistration: registration,
+          serviceWorkerRegistration: activeRegistration,
         });
 
         if (!token) {

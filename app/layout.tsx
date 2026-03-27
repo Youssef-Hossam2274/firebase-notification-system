@@ -23,7 +23,7 @@ export default function RootLayout({
           {`
             // Register service worker for background notifications
             if ('serviceWorker' in navigator) {
-              navigator.serviceWorker.register('/firebase-messaging-sw.js')
+              navigator.serviceWorker.register('/firebase-messaging-sw')
                 .then((registration) => {
                   console.log('Service Worker registered:', registration);
                 })
